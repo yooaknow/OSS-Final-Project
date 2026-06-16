@@ -321,19 +321,19 @@ def inject_base_style():
                 position: absolute;
                 left: 9%;
                 right: 9%;
-                top: 15%;
+                top: 8%;
                 bottom: 7%;
                 color: #35211A;
                 text-align: center;
             }
             .result-title {
-                margin: 0 0 20px;
+                margin: 0 0 14px;
                 font-size: 3.3rem;
                 line-height: 1.08;
                 font-weight: 900;
             }
             .result-summary {
-                margin: 0 auto 30px;
+                margin: 0 auto 20px;
                 max-width: 760px;
                 font-size: 1.35rem;
                 line-height: 1.55;
@@ -419,8 +419,12 @@ def inject_base_style():
                 .result-title {
                     font-size: 1.9rem;
                 }
+                .result-layer {
+                    top: 7%;
+                }
                 .result-summary {
                     font-size: 0.9rem;
+                    margin-bottom: 12px;
                 }
                 .result-card {
                     grid-template-columns: 1fr;
