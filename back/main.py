@@ -1,14 +1,16 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional
-import mysql.connector
-import os
-import json
 from datetime import datetime
+import json
+import os
+from typing import List
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+import mysql.connector
+from pydantic import BaseModel, Field
 import uvicorn
 
-app = FastAPI(title="국내 여행지 추천 API", version="1.0.0")
+
+app = FastAPI(title="Cafe Menu Recommendation API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -27,638 +29,220 @@ DB_CONFIG = {
     "connection_timeout": 5,
 }
 
-# ── 5 activities × 4 seasons × 3 destinations ────────────────────────────────
-DESTINATIONS = {
-    ("자연/힐링", "봄"): [
-        {
-            "name": "제주도",
-            "description": "유채꽃과 벚꽃이 만개하는 봄 제주는 자연 힐링의 정수입니다.",
-            "highlights": ["유채꽃 밭 (3~4월 절정)", "한라산 진달래 군락", "올레길 트레킹", "성산일출봉"],
-            "budget_range": {"알뜰하게": "20~35만원", "적당하게": "40~65만원", "여유롭게": "80만원+"},
-            "best_party": {"혼자": "올레길 단독 트레킹 최적", "2명": "렌트카 해안 드라이브", "3-4명": "게스트하우스+렌트카 경제적", "5명 이상": "풀빌라 대절 고려"},
-            "min_duration": "1박2일",
-            "tip": "3월 말~4월 초 유채꽃 절정기 방문 추천"
-        },
-        {
-            "name": "남해 독일마을",
-            "description": "봄꽃과 이국적인 유럽 분위기가 어우러진 조용한 힐링 명소.",
-            "highlights": ["독일마을 이국 풍경", "물건항 방조어부림", "보리암 일출", "다랭이 마을"],
-            "budget_range": {"알뜰하게": "10~20만원", "적당하게": "25~40만원", "여유롭게": "50만원+"},
-            "best_party": {"혼자": "조용한 산책과 사색 최적", "2명": "펜션에서 여유로운 봄날", "3-4명": "드라이브 코스로 인기", "5명 이상": "단체 펜션 예약 추천"},
-            "min_duration": "1박2일",
-            "tip": "주말 혼잡을 피해 평일 방문 추천"
-        },
-        {
-            "name": "담양 죽녹원",
-            "description": "연초록 대나무 숲에서 봄바람을 맞으며 걷는 전남의 숨은 명소.",
-            "highlights": ["죽녹원 대나무 숲길", "메타세쿼이아 길", "관방제림 산책", "소쇄원 전통정원"],
-            "budget_range": {"알뜰하게": "5~15만원", "적당하게": "15~30만원", "여유롭게": "35만원+"},
-            "best_party": {"혼자": "사색하며 걷기 좋음", "2명": "커플 산책 코스 인기", "3-4명": "가족 나들이 최적", "5명 이상": "당일 단체 여행 가능"},
-            "min_duration": "당일치기",
-            "tip": "담양 대통밥 꼭 먹어보세요"
-        },
-    ],
-    ("자연/힐링", "여름"): [
-        {
-            "name": "강릉 경포대",
-            "description": "시원한 동해 바다와 솔숲이 어우러진 여름 힐링의 대표 명소.",
-            "highlights": ["경포해변 해수욕", "안목해변 커피거리", "강릉 솔향공원", "오죽헌"],
-            "budget_range": {"알뜰하게": "15~25만원", "적당하게": "30~50만원", "여유롭게": "60만원+"},
-            "best_party": {"혼자": "자전거 해변 라이딩 추천", "2명": "서핑 강습 함께 도전", "3-4명": "비치 파라솔 여럿이 즐기기", "5명 이상": "펜션 단체 예약 필수"},
-            "min_duration": "1박2일",
-            "tip": "7~8월 성수기는 숙소 2개월 전 예약 필수"
-        },
-        {
-            "name": "거제 외도 보타니아",
-            "description": "남해 청정 바다 위 꽃섬, 유람선 타고 만나는 여름 바다 힐링.",
-            "highlights": ["외도 보타니아", "해금강 유람선", "학동 몽돌해변", "바람의 언덕"],
-            "budget_range": {"알뜰하게": "15~30만원", "적당하게": "35~55만원", "여유롭게": "65만원+"},
-            "best_party": {"혼자": "유람선 투어 혼자도 가능", "2명": "해안 드라이브 코스 최적", "3-4명": "렌트카+유람선 조합 추천", "5명 이상": "단체 유람선 예약 권장"},
-            "min_duration": "1박2일",
-            "tip": "외도 배편은 날씨에 따라 결항 가능, 여유 일정 확보 필요"
-        },
-        {
-            "name": "울릉도",
-            "description": "육지와 완전히 다른 청정 자연, 국내 유일의 진정한 섬 여행.",
-            "highlights": ["성인봉 트레킹", "봉래폭포", "독도 전망대", "나리분지"],
-            "budget_range": {"알뜰하게": "25~40만원", "적당하게": "45~70만원", "여유롭게": "80만원+"},
-            "best_party": {"혼자": "트레킹 혼자 즐기기 좋음", "2명": "섬 일주 드라이브 추천", "3-4명": "게스트하우스 쉐어 경제적", "5명 이상": "단체 숙박시설 사전 예약 필수"},
-            "min_duration": "2박3일",
-            "tip": "배 멀미약 필수 지참, 여름 성수기 배편 예약 필수"
-        },
-    ],
-    ("자연/힐링", "가을"): [
-        {
-            "name": "설악산 국립공원",
-            "description": "한국 최고의 단풍 명소, 웅장한 암릉과 붉은 단풍이 장관입니다.",
-            "highlights": ["울산바위 트레킹", "비선대 계곡", "케이블카 단풍 감상", "신흥사"],
-            "budget_range": {"알뜰하게": "10~20만원", "적당하게": "25~40만원", "여유롭게": "50만원+"},
-            "best_party": {"혼자": "트레킹 코스 혼자 도전", "2명": "케이블카+트레킹 커플 코스", "3-4명": "코스 나눠 도전", "5명 이상": "숙소 매우 일찍 예약 필수"},
-            "min_duration": "1박2일",
-            "tip": "10월 중순 단풍 최절정, 주말은 극도로 혼잡"
-        },
-        {
-            "name": "내장산",
-            "description": "전국 단풍 여행의 성지, 터널처럼 이어지는 단풍 오솔길이 유명.",
-            "highlights": ["단풍 터널 산책", "내장사 고찰", "케이블카 탑승", "탐방 전시관"],
-            "budget_range": {"알뜰하게": "8~18만원", "적당하게": "20~35만원", "여유롭게": "45만원+"},
-            "best_party": {"혼자": "사색하며 단풍길 걷기", "2명": "사진 찍기 좋은 커플 코스", "3-4명": "가족 단풍 나들이", "5명 이상": "단체 버스 대절 고려"},
-            "min_duration": "당일치기",
-            "tip": "10월 말~11월 초 방문, 셔틀버스 이용 추천"
-        },
-        {
-            "name": "평창 대관령",
-            "description": "고원 지대의 시원한 가을 바람과 억새밭, 목장 풍경의 힐링.",
-            "highlights": ["대관령 양떼목장", "삼양목장 억새", "오대산 단풍", "선자령 트레킹"],
-            "budget_range": {"알뜰하게": "10~20만원", "적당하게": "25~40만원", "여유롭게": "50만원+"},
-            "best_party": {"혼자": "선자령 능선 트레킹 추천", "2명": "목장+드라이브 낭만 코스", "3-4명": "가족 목장 체험 최적", "5명 이상": "단체 목장 체험 프로그램"},
-            "min_duration": "1박2일",
-            "tip": "9월~10월 억새 최절정, 고지대라 겉옷 필수"
-        },
-    ],
-    ("자연/힐링", "겨울"): [
-        {
-            "name": "평창 알펜시아",
-            "description": "국내 최고 스키 리조트와 설경, 겨울 스포츠 힐링의 메카.",
-            "highlights": ["알펜시아 스키장", "휘닉스 파크", "대관령 눈꽃축제", "오대산 설경"],
-            "budget_range": {"알뜰하게": "15~30만원", "적당하게": "35~60만원", "여유롭게": "80만원+"},
-            "best_party": {"혼자": "스키 레슨 개인 등록 가능", "2명": "스키+온천 커플 코스", "3-4명": "리조트 콘도 쉐어 경제적", "5명 이상": "단체 콘도 예약 할인 가능"},
-            "min_duration": "1박2일",
-            "tip": "평일 방문 시 리프트권 할인, 주말은 매우 붐빔"
-        },
-        {
-            "name": "겨울 제주도",
-            "description": "한라산 설경과 귤 향기, 관광객 적은 한적한 겨울 제주의 매력.",
-            "highlights": ["한라산 설경 등반", "성산일출봉 일출", "감귤 체험농장", "카멜리아힐 동백"],
-            "budget_range": {"알뜰하게": "20~35만원", "적당하게": "40~65만원", "여유롭게": "80만원+"},
-            "best_party": {"혼자": "조용한 겨울 제주 트레킹", "2명": "귤 농장+온천 체험", "3-4명": "렌트카로 여유 일주", "5명 이상": "풀빌라 단체 대절 추천"},
-            "min_duration": "2박3일",
-            "tip": "비수기라 숙소 가격 저렴, 바람이 강하니 바람막이 필수"
-        },
-        {
-            "name": "태백 눈꽃축제",
-            "description": "해발 700m 고원 도시 태백의 장관 같은 눈꽃 세상.",
-            "highlights": ["태백산 눈꽃 산행", "매봉산 풍력단지 설경", "삼수령 설경", "태백 눈꽃축제"],
-            "budget_range": {"알뜰하게": "8~15만원", "적당하게": "18~30만원", "여유롭게": "40만원+"},
-            "best_party": {"혼자": "태백산 눈꽃 산행 추천", "2명": "설경 사진 촬영 명소 순례", "3-4명": "눈꽃축제 체험 함께 즐기기", "5명 이상": "단체 민박 예약 추천"},
-            "min_duration": "1박2일",
-            "tip": "1~2월 방문, 방한 장비 완벽히 준비 필수"
-        },
-    ],
-    ("역사/문화", "봄"): [
-        {
-            "name": "경주",
-            "description": "천년 신라의 역사가 살아 숨쉬는 한국 최고의 역사 여행지.",
-            "highlights": ["불국사", "첨성대", "대릉원 왕릉", "동궁과 월지"],
-            "budget_range": {"알뜰하게": "10~20만원", "적당하게": "25~40만원", "여유롭게": "50만원+"},
-            "best_party": {"혼자": "자전거 대여로 유적지 투어", "2명": "야경 투어 코스 추천", "3-4명": "렌트카+역사 투어 효율적", "5명 이상": "문화해설사 동반 추천"},
-            "min_duration": "1박2일",
-            "tip": "봄 벚꽃 시즌 보문호 벚꽃 드라이브 필수"
-        },
-        {
-            "name": "전주 한옥마을",
-            "description": "800채 한옥이 모인 국내 최대 한옥 밀집지역, 전통 문화의 보고.",
-            "highlights": ["전주 한옥마을", "경기전 (이성계 어진)", "전동성당", "전주 비빔밥"],
-            "budget_range": {"알뜰하게": "8~18만원", "적당하게": "20~35만원", "여유롭게": "45만원+"},
-            "best_party": {"혼자": "한복 체험 혼자도 즐거움", "2명": "한복 커플 사진 명소", "3-4명": "먹거리 골목 탐방 최적", "5명 이상": "한옥 스테이 단체 예약"},
-            "min_duration": "1박2일",
-            "tip": "주말은 매우 붐비므로 평일 방문 권장"
-        },
-        {
-            "name": "안동 하회마을",
-            "description": "유네스코 세계문화유산, 조선시대 양반 생활을 그대로 간직한 마을.",
-            "highlights": ["하회마을", "병산서원", "안동 탈춤 공연", "안동 찜닭"],
-            "budget_range": {"알뜰하게": "8~18만원", "적당하게": "20~35만원", "여유롭게": "45만원+"},
-            "best_party": {"혼자": "전통 문화 사색 여행", "2명": "고즈넉한 마을 산책", "3-4명": "전통 체험 프로그램", "5명 이상": "탈춤 공연 단체 관람"},
-            "min_duration": "1박2일",
-            "tip": "매년 9~10월 안동 국제탈춤페스티벌 기간 방문 강력 추천"
-        },
-    ],
-    ("역사/문화", "여름"): [
-        {
-            "name": "경주 야경 투어",
-            "description": "조명 받는 야경이 아름다운 여름 밤의 경주, 더위를 잊는 역사 투어.",
-            "highlights": ["동궁과 월지 야경", "대릉원 야간 개방", "불국사 연꽃", "첨성대 야경"],
-            "budget_range": {"알뜰하게": "10~20만원", "적당하게": "25~40만원", "여유롭게": "50만원+"},
-            "best_party": {"혼자": "야경 투어 혼자 도전", "2명": "야간 데이트 코스", "3-4명": "낮 유적+밤 야경 코스", "5명 이상": "단체 야간 문화 투어"},
-            "min_duration": "1박2일",
-            "tip": "저녁 7시 이후 야경 투어 시작, 모기 기피제 필수"
-        },
-        {
-            "name": "공주·부여 백제 역사지구",
-            "description": "유네스코 세계문화유산 백제 역사지구, 잊혀진 왕국의 향기.",
-            "highlights": ["공산성", "무령왕릉", "정림사지 오층석탑", "궁남지 연꽃"],
-            "budget_range": {"알뜰하게": "8~18만원", "적당하게": "20~35만원", "여유롭게": "45만원+"},
-            "best_party": {"혼자": "조용한 역사 탐방 최적", "2명": "역사 커플 여행", "3-4명": "렌트카 공주-부여 연계", "5명 이상": "문화해설사 투어 추천"},
-            "min_duration": "1박2일",
-            "tip": "7~8월 궁남지 연꽃이 절정, 야경도 아름다움"
-        },
-        {
-            "name": "수원화성",
-            "description": "유네스코 세계문화유산 조선 시대 성곽, 수도권 당일치기 가능.",
-            "highlights": ["수원화성 성곽 투어", "화성행궁", "행리단길 먹거리", "화성열차"],
-            "budget_range": {"알뜰하게": "5~12만원", "적당하게": "15~25만원", "여유롭게": "30만원+"},
-            "best_party": {"혼자": "성곽길 혼자 걷기 좋음", "2명": "성곽+행리단길 코스", "3-4명": "가족 역사 체험", "5명 이상": "단체 문화 투어"},
-            "min_duration": "당일치기",
-            "tip": "여름 야간 성곽 개방 기간에 방문하면 야경이 장관"
-        },
-    ],
-    ("역사/문화", "가을"): [
-        {
-            "name": "가을 경주",
-            "description": "단풍과 유적이 어우러진 경주의 가을, 한국 역사 여행의 완성판.",
-            "highlights": ["불국사 단풍", "남산 유적 트레킹", "첨성대 억새", "동궁과 월지"],
-            "budget_range": {"알뜰하게": "10~20만원", "적당하게": "25~40만원", "여유롭게": "50만원+"},
-            "best_party": {"혼자": "남산 유적 트레킹 단독", "2명": "단풍+야경 투어", "3-4명": "전 코스 렌트카 투어", "5명 이상": "한옥 스테이 단체 예약"},
-            "min_duration": "1박2일",
-            "tip": "11월 초 불국사 단풍 최절정기 방문"
-        },
-        {
-            "name": "가을 안동",
-            "description": "국제탈춤페스티벌과 단풍이 겹치는 안동의 가을 황금기.",
-            "highlights": ["안동 국제탈춤페스티벌", "하회마을 단풍", "병산서원 단풍", "월영교 야경"],
-            "budget_range": {"알뜰하게": "8~18만원", "적당하게": "20~35만원", "여유롭게": "45만원+"},
-            "best_party": {"혼자": "탈춤 공연 관람", "2명": "축제+마을 산책", "3-4명": "전통 문화 체험 최적", "5명 이상": "단체 공연 관람+식사"},
-            "min_duration": "1박2일",
-            "tip": "9월 말~10월 초 국제탈춤페스티벌 기간 방문 강추"
-        },
-        {
-            "name": "가을 전주",
-            "description": "한옥마을의 단풍과 전통 문화, 가을 맛집 탐방의 완벽한 조합.",
-            "highlights": ["한옥마을 단풍", "경기전 가을", "덕진공원", "완산칠봉 단풍"],
-            "budget_range": {"알뜰하게": "8~18만원", "적당하게": "20~35만원", "여유롭게": "45만원+"},
-            "best_party": {"혼자": "한복 입고 단풍길 산책", "2명": "가을 커플 한옥 여행", "3-4명": "먹거리+역사 혼합 코스", "5명 이상": "한옥 스테이 단체 예약"},
-            "min_duration": "1박2일",
-            "tip": "10월~11월 초 방문, 평일에는 한옥마을이 여유로움"
-        },
-    ],
-    ("역사/문화", "겨울"): [
-        {
-            "name": "서울 고궁 투어",
-            "description": "눈 내린 고궁의 설경, 겨울에만 볼 수 있는 특별한 역사 문화 체험.",
-            "highlights": ["경복궁 설경", "창덕궁 후원", "덕수궁 돌담길", "인사동 전통 거리"],
-            "budget_range": {"알뜰하게": "5~12만원", "적당하게": "15~25만원", "여유롭게": "30만원+"},
-            "best_party": {"혼자": "고궁 혼자 산책", "2명": "덕수궁 돌담길 데이트", "3-4명": "고궁 투어+맛집", "5명 이상": "도보 역사 투어"},
-            "min_duration": "당일치기",
-            "tip": "겨울 고궁 야간 개방 기간 확인 후 방문"
-        },
-        {
-            "name": "겨울 전주 한옥마을",
-            "description": "처마에 고드름이 열리는 겨울 전주, 전통 체험과 따뜻한 맛집.",
-            "highlights": ["한옥마을 설경", "경기전 동절기", "전주 막걸리 골목", "수제 초콜릿 체험"],
-            "budget_range": {"알뜰하게": "8~18만원", "적당하게": "20~35만원", "여유롭게": "45만원+"},
-            "best_party": {"혼자": "한옥 스테이 혼자 힐링", "2명": "커플 한옥 스테이", "3-4명": "전통 체험+맛집 탐방", "5명 이상": "단체 한옥 스테이"},
-            "min_duration": "1박2일",
-            "tip": "겨울 비수기라 숙소 예약 여유롭고 가격 저렴"
-        },
-        {
-            "name": "겨울 수원화성",
-            "description": "눈 쌓인 성곽의 겨울 야경, 수도권 접근성 좋은 역사 여행.",
-            "highlights": ["화성 성곽 설경", "화성행궁 겨울 공연", "행리단길 맛집", "광교 호수공원"],
-            "budget_range": {"알뜰하게": "5~12만원", "적당하게": "15~25만원", "여유롭게": "30만원+"},
-            "best_party": {"혼자": "성곽길 겨울 산책", "2명": "야경+맛집 코스", "3-4명": "성곽 투어+식사", "5명 이상": "단체 문화 투어"},
-            "min_duration": "당일치기",
-            "tip": "12월~1월 야간 개방 시 조명 이벤트 진행"
-        },
-    ],
-    ("맛집탐방", "봄"): [
-        {
-            "name": "부산 자갈치·남포동",
-            "description": "봄 바다와 어우러진 부산 대표 먹거리, 씨앗호떡부터 밀면까지.",
-            "highlights": ["자갈치 시장 회", "남포동 씨앗호떡", "광안리 야경+맛집", "해운대 조기 해장국"],
-            "budget_range": {"알뜰하게": "12~22만원", "적당하게": "25~45만원", "여유롭게": "55만원+"},
-            "best_party": {"혼자": "혼밥 가능한 식당 많음", "2명": "2인 회 세트 코스", "3-4명": "해산물 파티 최적", "5명 이상": "단체 해산물 코스"},
-            "min_duration": "1박2일",
-            "tip": "자갈치 시장은 이른 아침 방문해야 싱싱한 해산물 만남 가능"
-        },
-        {
-            "name": "전주 먹거리 투어",
-            "description": "비빔밥, 콩나물국밥, 막걸리까지 한국 음식 문화의 중심지.",
-            "highlights": ["전주 비빔밥 원조", "콩나물국밥 골목", "막걸리 골목", "한옥마을 길거리 음식"],
-            "budget_range": {"알뜰하게": "8~18만원", "적당하게": "20~35만원", "여유롭게": "45만원+"},
-            "best_party": {"혼자": "1인 식당 많고 혼밥 문화", "2명": "다양한 음식 나눠 먹기", "3-4명": "여러 식당 골고루 탐방", "5명 이상": "단체 식사 예약 추천"},
-            "min_duration": "1박2일",
-            "tip": "조식 콩나물국밥, 점심 비빔밥, 저녁 막걸리 코스 추천"
-        },
-        {
-            "name": "춘천 닭갈비·막국수",
-            "description": "춘천 막국수와 닭갈비의 본고장, 봄 기운과 함께하는 미식 여행.",
-            "highlights": ["춘천 닭갈비 골목", "막국수 체험 박물관", "남이섬 봄꽃", "스카이워크"],
-            "budget_range": {"알뜰하게": "8~18만원", "적당하게": "20~35만원", "여유롭게": "40만원+"},
-            "best_party": {"혼자": "닭갈비 1인 메뉴 있음", "2명": "닭갈비 2인+막국수", "3-4명": "남이섬+닭갈비 코스", "5명 이상": "단체 닭갈비 파티"},
-            "min_duration": "당일치기",
-            "tip": "직화 닭갈비가 원조, 막국수는 물막국수로 마무리"
-        },
-    ],
-    ("맛집탐방", "여름"): [
-        {
-            "name": "강릉 커피·해산물",
-            "description": "안목해변 커피거리와 동해 해산물의 환상적 조합, 여름 미식의 정수.",
-            "highlights": ["안목해변 커피거리", "주문진 수산시장 오징어", "강릉 초당순두부", "경포 막국수"],
-            "budget_range": {"알뜰하게": "12~22만원", "적당하게": "25~40만원", "여유롭게": "50만원+"},
-            "best_party": {"혼자": "커피 투어 혼자도 좋음", "2명": "커피+해수욕 로맨틱 코스", "3-4명": "수산시장 단체 구매 알뜰", "5명 이상": "민박+수산시장 패키지"},
-            "min_duration": "1박2일",
-            "tip": "아침 초당 두부집 방문, 저녁은 주문진 수산시장 추천"
-        },
-        {
-            "name": "통영 해산물 투어",
-            "description": "한국의 나폴리 통영, 신선한 굴과 다채로운 해산물의 천국.",
-            "highlights": ["통영 굴 요리", "중앙시장 해산물", "케이블카+굴구이", "이순신 공원"],
-            "budget_range": {"알뜰하게": "12~22만원", "적당하게": "25~42만원", "여유롭게": "55만원+"},
-            "best_party": {"혼자": "혼자 시장 투어 추천", "2명": "굴구이 로맨틱 디너", "3-4명": "해산물 왕창 파티", "5명 이상": "단체 회 코스"},
-            "min_duration": "1박2일",
-            "tip": "케이블카는 평일 방문, 해산물은 오전 중앙시장에서"
-        },
-        {
-            "name": "대구 서문시장 야시장",
-            "description": "여름 밤을 불태우는 대구 서문시장 야시장, 저렴하고 다채로운 먹거리.",
-            "highlights": ["서문시장 야시장", "동성로 먹거리", "달성공원 근처 맛집", "납작만두"],
-            "budget_range": {"알뜰하게": "5~15만원", "적당하게": "15~28만원", "여유롭게": "35만원+"},
-            "best_party": {"혼자": "혼자 시장 탐방", "2명": "야시장 데이트 코스", "3-4명": "여러 음식 나눠 먹기", "5명 이상": "단체 야시장+식사"},
-            "min_duration": "당일치기",
-            "tip": "서문시장 야시장은 4~10월 금,토,일 운영"
-        },
-    ],
-    ("맛집탐방", "가을"): [
-        {
-            "name": "가을 전주 미식",
-            "description": "가을 수확의 계절 전주, 가장 풍성한 전통 음식을 맛볼 수 있는 시기.",
-            "highlights": ["전주 비빔밥", "한정식 코스", "막걸리+전 세트", "가을 한옥마을 야경"],
-            "budget_range": {"알뜰하게": "10~20만원", "적당하게": "25~40만원", "여유롭게": "55만원+"},
-            "best_party": {"혼자": "한정식 1인 코스 가능", "2명": "2인 한정식 추천", "3-4명": "전통 음식 코스 탐방", "5명 이상": "단체 한정식 예약"},
-            "min_duration": "1박2일",
-            "tip": "가을 전주는 단풍+음식 최고의 조합"
-        },
-        {
-            "name": "인천 차이나타운·개항장",
-            "description": "짜장면 발원지 인천, 개항기 건물과 함께하는 다국적 음식 투어.",
-            "highlights": ["차이나타운 짜장면", "신포시장 닭강정", "개항장 거리 카페", "소래포구 해산물"],
-            "budget_range": {"알뜰하게": "5~12만원", "적당하게": "15~25만원", "여유롭게": "30만원+"},
-            "best_party": {"혼자": "혼자 시장 탐방", "2명": "개항장 카페+시장 코스", "3-4명": "여러 음식 나눠 먹기", "5명 이상": "단체 차이나타운 투어"},
-            "min_duration": "당일치기",
-            "tip": "지하철 1호선 인천역에서 도보 가능, 수도권 접근성 최고"
-        },
-        {
-            "name": "속초 겨울 준비 미식",
-            "description": "가을 속초의 오징어와 대게 맛보기, 설악산 단풍과 함께하는 미식.",
-            "highlights": ["속초 중앙시장 오징어", "아바이 마을 순대", "설악산 단풍+식사", "속초 해장국"],
-            "budget_range": {"알뜰하게": "12~22만원", "적당하게": "25~42만원", "여유롭게": "55만원+"},
-            "best_party": {"혼자": "시장 혼자 탐방", "2명": "설악산+시장 코스", "3-4명": "해산물 파티+트레킹", "5명 이상": "단체 패키지"},
-            "min_duration": "1박2일",
-            "tip": "가을 오징어 제철, 설악산 단풍과 함께 즐기세요"
-        },
-    ],
-    ("맛집탐방", "겨울"): [
-        {
-            "name": "서울 광장시장·을지로",
-            "description": "겨울 서울의 핫플, 광장시장 빈대떡부터 을지로 맥줏집까지.",
-            "highlights": ["광장시장 빈대떡+마약김밥", "을지로 골뱅이 골목", "종로 청진동 해장국", "통인시장 도시락"],
-            "budget_range": {"알뜰하게": "5~12만원", "적당하게": "15~28만원", "여유롭게": "35만원+"},
-            "best_party": {"혼자": "혼밥 천국 서울 시장", "2명": "시장 투어+을지로 맥주", "3-4명": "여러 시장 나눠 탐방", "5명 이상": "단체 시장 투어"},
-            "min_duration": "당일치기",
-            "tip": "겨울 시장 먹거리는 오후 2~5시 방문이 가장 활성화"
-        },
-        {
-            "name": "속초 대게·온천",
-            "description": "겨울 명물 대게와 오징어, 설악산 설경과 온천의 완벽 조합.",
-            "highlights": ["속초 중앙시장 대게", "아바이 마을 순대", "설악산 설경", "척산 온천"],
-            "budget_range": {"알뜰하게": "15~28만원", "적당하게": "30~55만원", "여유롭게": "65만원+"},
-            "best_party": {"혼자": "시장+온천 혼자 힐링", "2명": "대게+온천 겨울 로맨스", "3-4명": "단체 대게 파티+온천", "5명 이상": "단체 팬션+대게 파티"},
-            "min_duration": "1박2일",
-            "tip": "12~2월 대게 제철, 새벽 경매 시장 구경도 추천"
-        },
-        {
-            "name": "통영 겨울 굴 축제",
-            "description": "굴의 계절, 겨울 통영에서 즐기는 제철 굴 요리 미식 투어.",
-            "highlights": ["통영 굴 구이", "통영 굴 칼국수", "중앙시장 해산물", "동피랑 벽화마을"],
-            "budget_range": {"알뜰하게": "12~22만원", "적당하게": "25~45만원", "여유롭게": "55만원+"},
-            "best_party": {"혼자": "굴 요리 1인 탐방", "2명": "굴 코스 요리 추천", "3-4명": "굴 파티+야경", "5명 이상": "단체 굴 파티"},
-            "min_duration": "1박2일",
-            "tip": "11~2월 통영 굴 제철, 굴 축제 기간 확인 후 방문"
-        },
-    ],
-    ("액티비티", "봄"): [
-        {
-            "name": "인제 내린천 래프팅",
-            "description": "봄 해빙 후 수량이 풍부한 내린천에서 즐기는 짜릿한 래프팅.",
-            "highlights": ["내린천 래프팅", "합강정 캠핑", "미시령 드라이브", "원대리 자작나무 숲"],
-            "budget_range": {"알뜰하게": "5~15만원", "적당하게": "18~35만원", "여유롭게": "45만원+"},
-            "best_party": {"혼자": "혼자 래프팅 팀 합류 가능", "2명": "2인 카약 추천", "3-4명": "팀 래프팅 최적 인원", "5명 이상": "단체 래프팅 패키지"},
-            "min_duration": "당일치기",
-            "tip": "4~6월 래프팅 최적기, 수온이 낮으니 방수 옷 착용 필수"
-        },
-        {
-            "name": "제주 해양 액티비티",
-            "description": "봄 제주 맑은 바다에서 즐기는 스노클링과 해녀 문화 체험.",
-            "highlights": ["협재 해변 스노클링", "우도 자전거 투어", "해녀 박물관", "쇠소깍 카약"],
-            "budget_range": {"알뜰하게": "15~28만원", "적당하게": "35~55만원", "여유롭게": "70만원+"},
-            "best_party": {"혼자": "우도 자전거 혼자 투어", "2명": "스노클링+자전거 코스", "3-4명": "해양 액티비티 패키지", "5명 이상": "단체 패키지 할인"},
-            "min_duration": "2박3일",
-            "tip": "스노클링은 물이 가장 맑은 5~6월 방문 추천"
-        },
-        {
-            "name": "가평 카약·캠핑",
-            "description": "수도권 접근성 좋은 가평에서 즐기는 아웃도어 액티비티.",
-            "highlights": ["북한강 카약", "에델바이스 스위스 테마파크", "자라섬 캠핑", "남이섬"],
-            "budget_range": {"알뜰하게": "5~15만원", "적당하게": "18~35만원", "여유롭게": "45만원+"},
-            "best_party": {"혼자": "카약 1인 가능", "2명": "2인 카약+캠핑", "3-4명": "자라섬 캠핑 최적", "5명 이상": "단체 캠핑+카약 패키지"},
-            "min_duration": "당일치기",
-            "tip": "서울에서 1시간 내외, 주말 예약 필수"
-        },
-    ],
-    ("액티비티", "여름"): [
-        {
-            "name": "양양 서핑",
-            "description": "MZ 서퍼들의 성지 양양, 서핑+힙한 카페+캠핑의 완벽 조합.",
-            "highlights": ["죽도해변 서핑", "서피비치", "양양 서핑 강습", "낙산사 해맞이"],
-            "budget_range": {"알뜰하게": "12~22만원", "적당하게": "25~45만원", "여유롭게": "55만원+"},
-            "best_party": {"혼자": "혼자 서핑 문화 즐기기 좋음", "2명": "서핑+캠핑 커플 여행", "3-4명": "서핑 파티+캠핑", "5명 이상": "단체 서퍼 여행 최적"},
-            "min_duration": "1박2일",
-            "tip": "서피비치 입장료 포함 패키지 구매 추천"
-        },
-        {
-            "name": "정선 짚라인·번지점프",
-            "description": "한국에서 가장 긴 짚라인과 번지점프, 여름 스릴 액티비티의 성지.",
-            "highlights": ["하이원 짚라인", "정선 번지점프", "아우라지 뗏목 체험", "동강 래프팅"],
-            "budget_range": {"알뜰하게": "8~18만원", "적당하게": "20~40만원", "여유롭게": "50만원+"},
-            "best_party": {"혼자": "1인 액티비티 모두 가능", "2명": "커플 짚라인 추천", "3-4명": "액티비티 왕창 패키지", "5명 이상": "단체 할인 패키지"},
-            "min_duration": "당일치기",
-            "tip": "짚라인은 사전 예약 필수, 체중 제한 확인"
-        },
-        {
-            "name": "부산 해양 스포츠",
-            "description": "한국 서핑 1번지 송정해변에서 즐기는 서핑과 다양한 해양 스포츠.",
-            "highlights": ["송정 서핑 강습", "해운대 제트보트", "광안리 바다 카약", "오션월드"],
-            "budget_range": {"알뜰하게": "12~22만원", "적당하게": "25~45만원", "여유롭게": "60만원+"},
-            "best_party": {"혼자": "서핑 혼자 강습 등록", "2명": "서핑 커플 강습", "3-4명": "해양 스포츠 패키지", "5명 이상": "단체 서핑 강습 할인"},
-            "min_duration": "1박2일",
-            "tip": "7~8월 서핑 성수기, 강습은 오전 일찍 예약"
-        },
-    ],
-    ("액티비티", "가을"): [
-        {
-            "name": "설악산 트레킹",
-            "description": "가을 단풍 속 설악산 트레킹, 대청봉에서 보는 단풍 파노라마.",
-            "highlights": ["대청봉 등반", "공룡능선 트레킹", "울산바위", "비선대 계곡"],
-            "budget_range": {"알뜰하게": "8~18만원", "적당하게": "20~35만원", "여유롭게": "45만원+"},
-            "best_party": {"혼자": "혼자 등반 코스 자유 선택", "2명": "코스 함께 도전", "3-4명": "그룹 트레킹 안전", "5명 이상": "단체 트레킹 안전망"},
-            "min_duration": "1박2일",
-            "tip": "10월 초~중순 단풍 절정, 대청봉은 이른 아침 출발 필수"
-        },
-        {
-            "name": "강원 레일바이크",
-            "description": "정선·강촌 레일바이크로 가을 단풍 속을 달리는 특별한 액티비티.",
-            "highlights": ["정선 레일바이크", "강촌 레일바이크", "아우라지 뗏목", "단풍 드라이브"],
-            "budget_range": {"알뜰하게": "5~15만원", "적당하게": "18~32만원", "여유롭게": "40만원+"},
-            "best_party": {"혼자": "1인 레일바이크 가능", "2명": "2인승 레일바이크 추천", "3-4명": "2+2인승 나눠 타기", "5명 이상": "단체 레일바이크 예약"},
-            "min_duration": "당일치기",
-            "tip": "10월 방문 시 가장 아름다운 단풍 감상, 예약 필수"
-        },
-        {
-            "name": "지리산 둘레길",
-            "description": "가을 지리산 둘레길 트레킹, 오색 단풍 속 유유자적 걷기 여행.",
-            "highlights": ["지리산 둘레길 1~3구간", "화엄사 단풍", "쌍계사 단풍", "피아골 단풍"],
-            "budget_range": {"알뜰하게": "8~18만원", "적당하게": "20~35만원", "여유롭게": "45만원+"},
-            "best_party": {"혼자": "혼자 걷기 여행 최적", "2명": "둘이 걷는 단풍길", "3-4명": "그룹 트레킹", "5명 이상": "단체 트레킹 투어"},
-            "min_duration": "2박3일",
-            "tip": "10월 중순~11월 초 피아골 단풍이 특히 아름다움"
-        },
-    ],
-    ("액티비티", "겨울"): [
-        {
-            "name": "화천 산천어 축제",
-            "description": "세계 4대 겨울 축제 화천 산천어 축제, 얼음낚시와 겨울 체험 총집합.",
-            "highlights": ["산천어 얼음 낚시", "빙판 썰매", "얼음 조각 전시", "포장마차 먹거리"],
-            "budget_range": {"알뜰하게": "8~18만원", "적당하게": "20~38만원", "여유롭게": "50만원+"},
-            "best_party": {"혼자": "낚시 혼자도 즐거움", "2명": "커플 얼음낚시 데이트", "3-4명": "가족 겨울 체험", "5명 이상": "단체 가족 축제 최적"},
-            "min_duration": "당일치기",
-            "tip": "1월 중순~2월 초 축제 기간, 입장권 사전 예매 필수"
-        },
-        {
-            "name": "평창 스키·썰매",
-            "description": "한국 최고 스키장들이 모인 평창, 겨울 액티비티의 모든 것.",
-            "highlights": ["알펜시아 스키장", "휘닉스 파크 스노우파크", "대관령 눈썰매장", "스노 모빌"],
-            "budget_range": {"알뜰하게": "15~30만원", "적당하게": "35~60만원", "여유롭게": "80만원+"},
-            "best_party": {"혼자": "스키 레슨 개인 등록", "2명": "스키 커플 패키지", "3-4명": "콘도 쉐어+스키", "5명 이상": "단체 콘도+리프트 할인"},
-            "min_duration": "1박2일",
-            "tip": "시즌 초인 12월이 설질 좋고 덜 붐빔"
-        },
-        {
-            "name": "인제 빙벽·빙어 낚시",
-            "description": "인제 빙벽 등반과 소양강 빙어 낚시, 진짜 겨울 액티비티 체험.",
-            "highlights": ["소양강 빙어 낚시", "빙벽 등반 체험", "원대리 자작나무 숲 설경", "합강정 얼음"],
-            "budget_range": {"알뜰하게": "8~18만원", "적당하게": "20~35만원", "여유롭게": "45만원+"},
-            "best_party": {"혼자": "빙어 낚시 혼자 도전", "2명": "빙벽+낚시 커플 체험", "3-4명": "액티비티 패키지", "5명 이상": "단체 겨울 체험"},
-            "min_duration": "1박2일",
-            "tip": "1~2월 빙어 낚시 시즌, 두꺼운 방한복 필수"
-        },
-    ],
-    ("쇼핑", "봄"): [
-        {
-            "name": "서울 동대문·명동",
-            "description": "봄 신상이 쏟아지는 서울 쇼핑 1번지, 패션부터 뷰티까지.",
-            "highlights": ["동대문 DDP 패션", "명동 화장품 거리", "남대문 시장", "홍대 인디 브랜드"],
-            "budget_range": {"알뜰하게": "10~25만원", "적당하게": "30~60만원", "여유롭게": "80만원+"},
-            "best_party": {"혼자": "혼자 쇼핑 자유롭게", "2명": "쇼핑+카페 코스", "3-4명": "명동 쇼핑 투어", "5명 이상": "단체 쇼핑+식사"},
-            "min_duration": "당일치기",
-            "tip": "동대문 새벽 시장은 도매가 구매 가능, 밤 11시 이후 방문"
-        },
-        {
-            "name": "부산 서면·남포동",
-            "description": "부산의 핫한 쇼핑 지구, 지역 특색 있는 패션과 먹거리 함께.",
-            "highlights": ["서면 지하상가", "남포동 BIFF 광장", "광복동 패션거리", "부산 국제시장"],
-            "budget_range": {"알뜰하게": "8~20만원", "적당하게": "25~50만원", "여유롭게": "65만원+"},
-            "best_party": {"혼자": "혼자 트렌디한 쇼핑", "2명": "쇼핑+해산물 코스", "3-4명": "시장+쇼핑 투어", "5명 이상": "단체 시장 쇼핑"},
-            "min_duration": "당일치기",
-            "tip": "국제시장은 오전 방문이 붐비지 않음"
-        },
-        {
-            "name": "제주 로컬 마켓",
-            "description": "제주 로컬 브랜드와 특산품, 주말 시장으로 즐기는 힐링 쇼핑 여행.",
-            "highlights": ["제주 오일장", "한림 수공예 시장", "제주 로컬 브랜드 샵", "애월 카페+숍"],
-            "budget_range": {"알뜰하게": "15~28만원", "적당하게": "35~55만원", "여유롭게": "70만원+"},
-            "best_party": {"혼자": "로컬 시장 혼자 탐방", "2명": "쇼핑+카페 투어", "3-4명": "렌트카로 시장 순례", "5명 이상": "단체 렌트카 쇼핑 투어"},
-            "min_duration": "2박3일",
-            "tip": "제주 오일장은 5일마다 열림, 날짜 미리 확인"
-        },
-    ],
-    ("쇼핑", "여름"): [
-        {
-            "name": "서울 성수동·홍대",
-            "description": "MZ 세대의 쇼핑 성지 성수동과 홍대, 빈티지부터 팝업까지.",
-            "highlights": ["성수동 팝업스토어", "홍대 인디 마켓", "망원시장", "합정 카페+쇼핑"],
-            "budget_range": {"알뜰하게": "8~20만원", "적당하게": "25~50만원", "여유롭게": "70만원+"},
-            "best_party": {"혼자": "팝업 스토어 혼자 탐방", "2명": "트렌디 쇼핑 코스", "3-4명": "성수+홍대 투어", "5명 이상": "단체 팝업+식사"},
-            "min_duration": "당일치기",
-            "tip": "성수동 팝업은 사전 예약 필요한 경우 많으니 미리 확인"
-        },
-        {
-            "name": "강남 코엑스몰",
-            "description": "서울 최대 실내 복합 쇼핑몰 코엑스, 여름 더위 피하며 쇼핑.",
-            "highlights": ["코엑스 별마당 도서관", "SMTOWN 어뮤즈먼트", "압구정 로데오", "청담동 명품 거리"],
-            "budget_range": {"알뜰하게": "10~25만원", "적당하게": "30~70만원", "여유롭게": "100만원+"},
-            "best_party": {"혼자": "코엑스 혼자 쇼핑+카페", "2명": "압구정+코엑스 코스", "3-4명": "코엑스+강남 투어", "5명 이상": "단체 강남 쇼핑 투어"},
-            "min_duration": "당일치기",
-            "tip": "여름 더위 피해 실내 코엑스 쇼핑 최적"
-        },
-        {
-            "name": "파주 프리미엄 아울렛",
-            "description": "아울렛+헤이리 예술마을의 조합, 여름 기획전 시즌 알뜰 쇼핑.",
-            "highlights": ["파주 프리미엄 아울렛", "헤이리 예술마을", "임진각 관광지", "프로방스 마을"],
-            "budget_range": {"알뜰하게": "10~25만원", "적당하게": "30~70만원", "여유롭게": "100만원+"},
-            "best_party": {"혼자": "아울렛 혼자 쇼핑", "2명": "아울렛+헤이리 코스", "3-4명": "가을 소풍+쇼핑", "5명 이상": "단체 아울렛 쇼핑"},
-            "min_duration": "당일치기",
-            "tip": "여름 세일 시즌(6~8월) 방문 시 최대 70% 할인"
-        },
-    ],
-    ("쇼핑", "가을"): [
-        {
-            "name": "서울 인사동·북촌",
-            "description": "가을 단풍 속 인사동 공예품과 북촌 한옥마을, 전통 문화 쇼핑.",
-            "highlights": ["인사동 공예품 거리", "북촌 한옥마을 숍", "삼청동 카페+갤러리", "경복궁 단풍"],
-            "budget_range": {"알뜰하게": "8~18만원", "적당하게": "20~40만원", "여유롭게": "55만원+"},
-            "best_party": {"혼자": "공예품 감상+구매 혼자", "2명": "북촌+삼청동 데이트 코스", "3-4명": "전통 공예 체험+쇼핑", "5명 이상": "단체 북촌 투어"},
-            "min_duration": "당일치기",
-            "tip": "10~11월 방문 시 단풍+쇼핑 최고의 조합"
-        },
-        {
-            "name": "전주 공예 쇼핑",
-            "description": "가을 한옥마을에서 즐기는 전통 공예품과 특산물 쇼핑.",
-            "highlights": ["전통 공예품 거리", "한지 공예 체험", "전주 특산 한지", "전통 다기 세트"],
-            "budget_range": {"알뜰하게": "8~18만원", "적당하게": "20~40만원", "여유롭게": "55만원+"},
-            "best_party": {"혼자": "공예품 감상+구매", "2명": "한복 체험+공예 쇼핑", "3-4명": "전통 체험+쇼핑", "5명 이상": "단체 공예 체험 투어"},
-            "min_duration": "1박2일",
-            "tip": "전주 한지 제품은 전국에서 가장 품질 좋고 다양"
-        },
-        {
-            "name": "여주·이천 아울렛",
-            "description": "프리미엄 아울렛과 이천 도자기 쇼핑, 가을 수도권 근교 알찬 쇼핑.",
-            "highlights": ["여주 프리미엄 아울렛", "이천 도자기 마을", "신륵사 가을 경치", "이천 쌀밥"],
-            "budget_range": {"알뜰하게": "10~25만원", "적당하게": "30~70만원", "여유롭게": "100만원+"},
-            "best_party": {"혼자": "아울렛 혼자 쇼핑", "2명": "아울렛+도자기 체험", "3-4명": "단체 아울렛+식사", "5명 이상": "단체 쇼핑 투어"},
-            "min_duration": "당일치기",
-            "tip": "가을 시즌 세일 10월, 평일 방문 시 주차 여유로움"
-        },
-    ],
-    ("쇼핑", "겨울"): [
-        {
-            "name": "서울 크리스마스 쇼핑",
-            "description": "겨울 서울의 화려한 크리스마스 조명과 함께하는 쇼핑 투어.",
-            "highlights": ["명동 크리스마스 마켓", "신촌 트리+쇼핑", "코엑스 크리스마스 전시", "청계천 빛 축제"],
-            "budget_range": {"알뜰하게": "10~25만원", "적당하게": "30~65만원", "여유롭게": "90만원+"},
-            "best_party": {"혼자": "야경+쇼핑 혼자 즐기기", "2명": "크리스마스 쇼핑 데이트", "3-4명": "명동+코엑스 투어", "5명 이상": "단체 크리스마스 쇼핑"},
-            "min_duration": "당일치기",
-            "tip": "12월 명동 크리스마스 마켓은 평일에 덜 붐빔"
-        },
-        {
-            "name": "부산 센텀시티",
-            "description": "세계 최대 규모 백화점과 겨울 부산 해운대, 쇼핑+겨울 바다 조합.",
-            "highlights": ["신세계 센텀시티 백화점", "해운대 겨울 바다", "롯데 센텀시티", "부산 지하상가"],
-            "budget_range": {"알뜰하게": "12~25만원", "적당하게": "30~70만원", "여유롭게": "100만원+"},
-            "best_party": {"혼자": "백화점 혼자 쇼핑", "2명": "쇼핑+겨울 바다 코스", "3-4명": "센텀시티 단체 쇼핑", "5명 이상": "단체 쇼핑+식사"},
-            "min_duration": "1박2일",
-            "tip": "12월 말~1월 초 백화점 세일 시즌 활용"
-        },
-        {
-            "name": "여주 아울렛 (겨울 세일)",
-            "description": "겨울 최대 세일 시즌 여주 프리미엄 아울렛 + 이천 도자기.",
-            "highlights": ["여주 프리미엄 아울렛 겨울 세일", "이천 도자기 마을", "신륵사 겨울 경치", "이천 쌀밥"],
-            "budget_range": {"알뜰하게": "10~25만원", "적당하게": "30~70만원", "여유롭게": "100만원+"},
-            "best_party": {"혼자": "아울렛 혼자 쇼핑", "2명": "아울렛+도자기 체험", "3-4명": "단체 아울렛+식사", "5명 이상": "단체 쇼핑 투어"},
-            "min_duration": "당일치기",
-            "tip": "겨울 아울렛 최대 세일은 12월~1월, 평일 방문 추천"
-        },
-    ],
-}
-
-DURATION_ORDER = ["당일치기", "1박2일", "2박3일", "3박 이상"]
-
 
 class RecommendRequest(BaseModel):
-    party_size: str
-    duration: str
-    activity: str
-    budget: str
-    season: str
+    weather: str
+    mood: str
+    sweetness: int = Field(ge=1, le=5)
+    caffeine_sensitivity: int = Field(ge=1, le=5)
+    time_of_day: str
 
 
-class DestinationResult(BaseModel):
+class MenuResult(BaseModel):
+    rank: int
     name: str
+    dessert: str
+    score: int
     description: str
-    highlights: List[str]
-    estimated_cost: str
-    party_tip: str
-    duration_note: str
-    tip: str
+    reason: str
+    tags: List[str]
 
 
 class RecommendResponse(BaseModel):
-    recommendations: List[DestinationResult]
-    activity: str
-    season: str
+    recommendations: List[MenuResult]
+    top_menu: MenuResult
     summary: str
+
+
+MENU_CANDIDATES = [
+    {
+        "name": "바닐라 라떼",
+        "dessert": "버터 크루아상",
+        "base": 55,
+        "caffeine": 3,
+        "sweetness": 4,
+        "tags": ["달콤함", "부드러움", "따뜻한 라떼"],
+        "description": "바닐라 향과 우유의 부드러움이 잘 어울리는 편안한 메뉴입니다.",
+    },
+    {
+        "name": "카라멜 마끼아또",
+        "dessert": "치즈케이크",
+        "base": 52,
+        "caffeine": 3,
+        "sweetness": 5,
+        "tags": ["진한 단맛", "기분 전환", "디저트 조합"],
+        "description": "카라멜의 달콤함이 확실해서 당 충전이 필요할 때 좋습니다.",
+    },
+    {
+        "name": "자몽 에이드",
+        "dessert": "마카롱",
+        "base": 50,
+        "caffeine": 0,
+        "sweetness": 3,
+        "tags": ["무카페인", "상큼함", "가벼움"],
+        "description": "카페인이 부담스러운 날에도 마시기 좋은 상큼한 음료입니다.",
+    },
+    {
+        "name": "아이스 아메리카노",
+        "dessert": "초코 쿠키",
+        "base": 48,
+        "caffeine": 5,
+        "sweetness": 1,
+        "tags": ["깔끔함", "집중", "저당"],
+        "description": "단맛이 적고 카페인이 강해 집중이 필요한 시간에 잘 맞습니다.",
+    },
+    {
+        "name": "말차 라떼",
+        "dessert": "말차 파운드케이크",
+        "base": 51,
+        "caffeine": 2,
+        "sweetness": 3,
+        "tags": ["은은함", "차분함", "고소함"],
+        "description": "쌉싸름한 말차와 우유가 섞여 차분한 맛을 냅니다.",
+    },
+    {
+        "name": "핫초코",
+        "dessert": "초코 브라우니",
+        "base": 49,
+        "caffeine": 1,
+        "sweetness": 5,
+        "tags": ["무드 회복", "달콤함", "따뜻함"],
+        "description": "카페인은 낮고 단맛은 높아 피곤하거나 우울한 날에 잘 어울립니다.",
+    },
+]
 
 
 def get_db():
     return mysql.connector.connect(**DB_CONFIG)
 
 
-def save_history(req: RecommendRequest, results: List[DestinationResult]):
+def ensure_history_table(cursor):
+    cursor.execute(
+        """CREATE TABLE IF NOT EXISTS cafe_recommendation_history (
+            id                     INT AUTO_INCREMENT PRIMARY KEY,
+            weather                VARCHAR(20) NOT NULL,
+            mood                   VARCHAR(20) NOT NULL,
+            sweetness              INT NOT NULL,
+            caffeine_sensitivity   INT NOT NULL,
+            time_of_day            VARCHAR(20) NOT NULL,
+            results_json           JSON,
+            created_at             TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )"""
+    )
+
+
+def score_menu(menu: dict, req: RecommendRequest) -> tuple[int, list[str]]:
+    score = menu["base"]
+    reasons: list[str] = []
+
+    if req.weather == "비":
+        if "라떼" in menu["name"] or menu["name"] == "핫초코":
+            score += 16
+            reasons.append("비 오는 날에는 따뜻하고 부드러운 메뉴가 잘 어울립니다")
+    elif req.weather == "맑음":
+        if menu["name"] in ["자몽 에이드", "아이스 아메리카노"]:
+            score += 13
+            reasons.append("맑은 날에는 가볍고 산뜻한 메뉴가 잘 맞습니다")
+    elif req.weather == "눈":
+        if menu["name"] in ["핫초코", "바닐라 라떼", "말차 라떼"]:
+            score += 15
+            reasons.append("눈 오는 날에는 따뜻한 음료가 분위기와 잘 맞습니다")
+
+    if req.mood == "기분 좋음":
+        if menu["sweetness"] >= 3:
+            score += 8
+            reasons.append("좋은 기분을 이어가기 좋은 달콤한 조합입니다")
+    elif req.mood == "피곤함":
+        if menu["caffeine"] >= 3 and req.caffeine_sensitivity <= 3:
+            score += 15
+            reasons.append("피곤할 때 도움이 되는 카페인 메뉴입니다")
+        if menu["name"] == "핫초코":
+            score += 6
+    elif req.mood == "스트레스":
+        if menu["sweetness"] >= 4:
+            score += 14
+            reasons.append("스트레스가 있을 때 단맛으로 기분 전환하기 좋습니다")
+
+    sweetness_gap = abs(menu["sweetness"] - req.sweetness)
+    score += max(0, 12 - sweetness_gap * 4)
+    if sweetness_gap <= 1:
+        reasons.append("선택한 단맛 선호도와 잘 맞습니다")
+
+    if req.caffeine_sensitivity >= 4:
+        score += (5 - menu["caffeine"]) * 4
+        if menu["caffeine"] <= 1:
+            reasons.append("카페인 민감도가 높아 저카페인 메뉴를 우선 추천했습니다")
+    else:
+        score += menu["caffeine"] * 2
+        if menu["caffeine"] >= 3:
+            reasons.append("카페인 민감도가 낮아 커피 메뉴도 부담이 적습니다")
+
+    if req.time_of_day == "오전":
+        if menu["name"] in ["아이스 아메리카노", "바닐라 라떼", "말차 라떼"]:
+            score += 8
+            reasons.append("오전에 마시기 좋은 깔끔한 메뉴입니다")
+    elif req.time_of_day == "오후":
+        if menu["name"] in ["카라멜 마끼아또", "자몽 에이드", "말차 라떼"]:
+            score += 8
+            reasons.append("오후 간식 시간에 디저트와 함께 즐기기 좋습니다")
+    elif req.time_of_day == "밤":
+        if menu["caffeine"] <= 1:
+            score += 14
+            reasons.append("밤에는 카페인이 낮은 메뉴가 더 편안합니다")
+
+    if not reasons:
+        reasons.append("입력 조건을 종합했을 때 가장 균형 잡힌 선택입니다")
+
+    return score, reasons
+
+
+def build_recommendations(req: RecommendRequest) -> List[MenuResult]:
+    scored = []
+    for menu in MENU_CANDIDATES:
+        score, reasons = score_menu(menu, req)
+        scored.append((score, menu, reasons))
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+
+    results: List[MenuResult] = []
+    for rank, (score, menu, reasons) in enumerate(scored[:3], start=1):
+        results.append(
+            MenuResult(
+                rank=rank,
+                name=menu["name"],
+                dessert=menu["dessert"],
+                score=min(score, 99),
+                description=menu["description"],
+                reason=" ".join(reasons[:3]) + ".",
+                tags=menu["tags"],
+            )
+        )
+    return results
+
+
+def save_history(req: RecommendRequest, results: List[MenuResult]):
     try:
         conn = get_db()
         cursor = conn.cursor()
+        ensure_history_table(cursor)
         cursor.execute(
-            """INSERT INTO recommendation_history
-               (party_size, duration, activity, budget, season, results_json)
+            """INSERT INTO cafe_recommendation_history
+               (weather, mood, sweetness, caffeine_sensitivity, time_of_day, results_json)
                VALUES (%s, %s, %s, %s, %s, %s)""",
-            (req.party_size, req.duration, req.activity, req.budget, req.season,
-             json.dumps([r.model_dump() for r in results], ensure_ascii=False)),
+            (
+                req.weather,
+                req.mood,
+                req.sweetness,
+                req.caffeine_sensitivity,
+                req.time_of_day,
+                json.dumps([r.model_dump() for r in results], ensure_ascii=False),
+            ),
         )
         conn.commit()
         cursor.close()
         conn.close()
     except Exception:
-        pass  # DB 없어도 추천 기능은 동작
+        pass
 
 
 @app.get("/health")
@@ -675,42 +259,15 @@ def health():
 
 @app.post("/recommend", response_model=RecommendResponse)
 def recommend(req: RecommendRequest):
-    key = (req.activity, req.season)
-    destinations = DESTINATIONS.get(key)
-    if not destinations:
-        raise HTTPException(status_code=404, detail="해당 조건에 맞는 여행지가 없습니다.")
-
-    req_dur_idx = DURATION_ORDER.index(req.duration)
-    results: List[DestinationResult] = []
-    for dest in destinations:
-        min_idx = DURATION_ORDER.index(dest["min_duration"])
-        if req_dur_idx < min_idx:
-            dur_note = f"⚠️ 최소 {dest['min_duration']} 일정 권장"
-        else:
-            dur_note = f"✅ {req.duration} 일정에 적합"
-
-        results.append(DestinationResult(
-            name=dest["name"],
-            description=dest["description"],
-            highlights=dest["highlights"],
-            estimated_cost=dest["budget_range"][req.budget],
-            party_tip=dest["best_party"].get(req.party_size, ""),
-            duration_note=dur_note,
-            tip=dest["tip"],
-        ))
-
+    results = build_recommendations(req)
+    top = results[0]
     summary = (
-        f"{req.season} {req.activity} 여행 — "
-        f"{req.party_size}, {req.duration}, {req.budget} 예산에 맞는 여행지 3곳을 선정했습니다."
-    )
-    response = RecommendResponse(
-        recommendations=results,
-        activity=req.activity,
-        season=req.season,
-        summary=summary,
+        f"{req.weather} 날씨, {req.mood} 기분, 단맛 {req.sweetness}/5, "
+        f"카페인 민감도 {req.caffeine_sensitivity}/5 조건에 맞춰 "
+        f"{top.name} + {top.dessert} 세트를 추천합니다."
     )
     save_history(req, results)
-    return response
+    return RecommendResponse(recommendations=results, top_menu=top, summary=summary)
 
 
 @app.get("/history")
@@ -718,9 +275,10 @@ def get_history(limit: int = 10):
     try:
         conn = get_db()
         cursor = conn.cursor(dictionary=True)
+        ensure_history_table(cursor)
         cursor.execute(
-            "SELECT id, party_size, duration, activity, budget, season, created_at "
-            "FROM recommendation_history ORDER BY created_at DESC LIMIT %s",
+            "SELECT id, weather, mood, sweetness, caffeine_sensitivity, time_of_day, created_at "
+            "FROM cafe_recommendation_history ORDER BY created_at DESC LIMIT %s",
             (limit,),
         )
         rows = cursor.fetchall()

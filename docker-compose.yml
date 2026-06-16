@@ -24,6 +24,7 @@ services:
 
   back:
     build: ./back
+    image: yooahreaum/travel-back:latest
     container_name: travel_back
     restart: unless-stopped
     environment:
@@ -40,10 +41,13 @@ services:
 
   front:
     build: ./front
+    image: yooahreaum/travel-front:latest
     container_name: travel_front
     restart: unless-stopped
     environment:
       BACKEND_URL: http://back:8000
+    volumes:
+      - ./front:/app
     ports:
       - "8501:8501"
     depends_on:
