@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────
-#  deploy.sh  ─  단 하나의 명령으로 최신화 → 빌드 → 푸시 → 실행
+#  deploy.sh  ─  단 하나의 명령으로 최신화 → 빌드 → 실행
 #
 #  사용법 (레포 클론 후 EC2 에서 실행):
 #    bash deploy.sh
@@ -8,18 +8,25 @@
 #  이 스크립트는 다음을 자동으로 수행합니다:
 #    1. Docker 미설치 시 자동 설치 (Ubuntu / Amazon Linux 2)
 #    2. GitHub 최신 코드 강제 동기화
-#    3. Docker 캐시/이미지 정리로 디스크 공간 확보
-#    4. DockerHub 로그인
-#    5. 백엔드 / 프론트엔드 이미지 빌드 (docker compose)
-#    6. 두 이미지 DockerHub 푸시
-#    7. 기존 컨테이너 및 볼륨 완전 삭제
-#    8. docker compose up (db + back + front)
-#    9. 접속 URL 안내
+#    3. 프론트 assets 존재 확인
+#    4. 백엔드 / 프론트엔드 이미지 빌드 (docker compose 캐시 사용)
+#    5. docker compose up (db + back + front)
+#    6. 접속 URL 안내
+#
+#  선택 옵션:
+#    PRUNE_DOCKER=1 bash deploy.sh    # 미사용 Docker 리소스 정리
+#    FULL_REBUILD=1 bash deploy.sh    # --pull --no-cache 전체 리빌드
+#    PUSH_IMAGES=1 bash deploy.sh     # DockerHub 로그인 후 이미지 푸시
+#    RESET_VOLUMES=1 bash deploy.sh   # DB 볼륨까지 삭제 후 재시작
 # ─────────────────────────────────────────────────────────────────
 
 set -euo pipefail
 
 DOCKER_USER="yooahreaum"
+PRUNE_DOCKER="${PRUNE_DOCKER:-0}"
+FULL_REBUILD="${FULL_REBUILD:-0}"
+PUSH_IMAGES="${PUSH_IMAGES:-0}"
+RESET_VOLUMES="${RESET_VOLUMES:-0}"
 
 GREEN="\033[0;32m"; YELLOW="\033[1;33m"; CYAN="\033[0;36m"; RESET="\033[0m"
 info()    { echo -e "${CYAN}[INFO]${RESET}  $*"; }
@@ -99,49 +106,56 @@ if [ ! -f "front/assets/onboarding.png" ]; then
 fi
 success "프론트 assets 확인 완료"
 
-# ── [Step 3] Docker 캐시 정리 (디스크 공간 확보) ────────────────
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-info "[Step 3] 미사용 Docker 리소스 정리"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-docker system prune -f
-success "Docker 캐시 정리 완료"
+if [ "${PRUNE_DOCKER}" = "1" ]; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    info "[Step 3] 미사용 Docker 리소스 정리"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    docker system prune -f
+    success "Docker 캐시 정리 완료"
+else
+    info "[Step 3] Docker 캐시 정리 건너뜀 (PRUNE_DOCKER=1 로 실행 가능)"
+fi
 
-# ── [Step 4] DockerHub 로그인 ────────────────────────────────────
+# ── [Step 4] 이미지 빌드 ─────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-info "[Step 4] DockerHub 로그인 (${DOCKER_USER})"
+info "[Step 4] 백엔드 / 프론트엔드 이미지 빌드"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-docker login
-success "DockerHub 로그인 완료"
-
-# ── [Step 5] 이미지 빌드 ─────────────────────────────────────────
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-info "[Step 5] 백엔드 / 프론트엔드 이미지 빌드"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-docker compose build --pull --no-cache
+if [ "${FULL_REBUILD}" = "1" ]; then
+    docker compose build --pull --no-cache
+else
+    docker compose build
+fi
 success "이미지 빌드 완료"
 
-# ── [Step 6] DockerHub 푸시 ──────────────────────────────────────
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-info "[Step 6] 이미지 DockerHub 푸시"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-docker compose push
-success "DockerHub 푸시 완료"
+if [ "${PUSH_IMAGES}" = "1" ]; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    info "[Step 5] DockerHub 로그인 및 이미지 푸시 (${DOCKER_USER})"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    docker login
+    docker compose push
+    success "DockerHub 푸시 완료"
+else
+    info "[Step 5] DockerHub 푸시 건너뜀 (PUSH_IMAGES=1 로 실행 가능)"
+fi
 
-# ── [Step 7] 기존 컨테이너 및 볼륨 완전 삭제 ────────────────────
+# ── [Step 6] 기존 컨테이너 정리 ─────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-info "[Step 7] 기존 컨테이너 및 볼륨 삭제"
+info "[Step 6] 기존 컨테이너 정리"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-docker compose down -v 2>/dev/null && success "기존 컨테이너/볼륨 삭제 완료" || true
+if [ "${RESET_VOLUMES}" = "1" ]; then
+    docker compose down -v --remove-orphans 2>/dev/null && success "기존 컨테이너/볼륨 삭제 완료" || true
+else
+    docker compose down --remove-orphans 2>/dev/null && success "기존 컨테이너 삭제 완료" || true
+fi
 
-# ── [Step 8] 서비스 시작 ─────────────────────────────────────────
+# ── [Step 7] 서비스 시작 ─────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-info "[Step 8] 서비스 시작 (db + back + front)"
+info "[Step 7] 서비스 시작 (db + back + front)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 docker compose up -d --force-recreate
 success "모든 서비스 시작 완료"
@@ -151,7 +165,7 @@ info "컨테이너 상태 확인 중..."
 sleep 3
 docker compose ps
 
-# ── [Step 9] 접속 URL 출력 ───────────────────────────────────────
+# ── [Step 8] 접속 URL 출력 ───────────────────────────────────────
 PUBLIC_IP=$(curl -s --max-time 3 \
     http://169.254.169.254/latest/meta-data/public-ipv4 \
     2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
