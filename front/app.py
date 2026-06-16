@@ -321,7 +321,7 @@ def inject_base_style():
                 position: absolute;
                 left: 9%;
                 right: 9%;
-                top: 8%;
+                top: 4%;
                 bottom: 7%;
                 color: #35211A;
                 text-align: center;
@@ -420,7 +420,7 @@ def inject_base_style():
                     font-size: 1.9rem;
                 }
                 .result-layer {
-                    top: 7%;
+                    top: 5%;
                 }
                 .result-summary {
                     font-size: 0.9rem;
@@ -521,9 +521,6 @@ def render_result():
                 <div class="result-layer">
                     <h1 class="result-title">추천을 불러오지 못했어요</h1>
                     <p class="result-summary">{html.escape(st.session_state.result_error)}</p>
-                    <div class="result-actions">
-                        <a class="primary-link" href="?action=reset" target="_self">처음부터 다시</a>
-                    </div>
                 </div>
             </div>
             """,
@@ -545,7 +542,6 @@ def render_result():
         <div class="mood-screen">
             <img src="{image_to_data_uri(background)}" alt="Mood Brew result">
             <div class="result-layer">
-                <h1 class="result-title">오늘의 Mood Brew</h1>
                 <p class="result-summary">{html.escape(data["summary"])}</p>
                 <div class="result-card">
                     <div>{menu_image_html}</div>
@@ -555,9 +551,6 @@ def render_result():
                         <p class="reason">{html.escape(top["reason"])}</p>
                         <div class="tags">{tags}</div>
                     </div>
-                </div>
-                <div class="result-actions">
-                    <a class="primary-link" href="?action=reset" target="_self">다시 추천받기</a>
                 </div>
             </div>
         </div>
